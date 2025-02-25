@@ -1,0 +1,161 @@
+#!/bin/bash
+# Copyright (C) 2025 Chainguard
+# Author: Łukasz 'sil2100' Zemczak
+
+usage() {
+	echo "rdep-retest [-d] [-h] [-r REPO] [-L LOGS] [-S STATE] [-i INDEX] [-q] DEPENDENCY"
+	echo "  -d, --dry-run           Do not run the tests, just print the commands"
+	echo "  -h, --help              Print this help message"
+	echo "  -r, --repository        The repository to test against"
+	echo "  -L, --logs-dir          The directory to store the logs"
+	echo "  -S, --state-dir         The directory to store the state"
+	echo "  -i, --destination-index The destination index to test against"
+	echo "  -q, --quiet             Do not print the output"
+	echo "  DEPENDENCY              The dep to test against"
+}
+
+
+redirect_output() {
+	if [ -n "$1" ]; then
+		exec 3>&1 4>&2 >$1 2>&1
+	fi
+}
+
+
+restore_output() {
+	if [ -n "$1" ]; then
+		exec 1>&3 2>&4
+	fi
+}
+
+
+rdep_test() {
+	# Do the actual testing
+	local pkg=$1
+	local passed_file=$2
+	local failed_file=$3
+	local no_regression_file=$4
+	local logfile=$5
+
+	echo "=======> Testing $pkg"
+	if [ $DRYRUN -eq 1 ]; then
+		redirect_output $logfile
+		echo "DRYRUN: HTTP_AUTH=\"basic:apk.cgr.dev:user:$(chainctl auth token --audience apk.cgr.dev)\" MELANGE_EXTRA_OPTS=\"$REPO_OPTS\" make test/$pkg"
+		restore_output $logfile
+		return
+	fi
+
+	redirect_output $logfile
+	HTTP_AUTH="basic:apk.cgr.dev:user:$(chainctl auth token --audience apk.cgr.dev)" MELANGE_EXTRA_OPTS="$REPO_OPTS" make test/$pkg
+	if [ $? != 0 ]; then
+		restore_output $logfile
+		echo "=======> Tests for $pkg failed, checking against prod"
+		HTTP_AUTH="basic:apk.cgr.dev:user:$(chainctl auth token --audience apk.cgr.dev)" make test/$pkg
+		if [ $? != 0 ]; then
+			echo "=======> Tests for $pkg failed on both, noting down"
+			echo "$pkg" >>$no_regression_file
+		else
+			echo "=======> Tests for $pkg failed against the pages in testing, important"
+			echo "$pkg" >>$failed_file
+		fi
+	else
+		restore_output $logfile
+		echo "$pkg" >>$passed_file
+	fi
+}
+
+
+run_tests() {
+	local pkgs=$(apkrane ls --json --latest $INDEX | jq -r 'select(.Dependencies) | select(.Dependencies | index("'$AGAINST'")) | .Origin' | sort | uniq)
+	#local pkgs=$(cat /tmp/ble/test.list)
+	local count=$(echo "$pkgs" | wc -l)
+	local passed_file="$STATE/passed"
+	local failed_file="$STATE/failed"
+	local no_regression_file="$STATE/no-regression"
+	local logfile=""
+
+	# Clean up, just in case, so we start afresh
+	rm -f $passed_file $failed_file $no_regression_file
+
+	let i=1
+	for pkg in $pkgs; do
+		echo "=======> Testing package $i/$count..."
+
+		# Handle logfile redirect
+		if [ -n "$LOGS" ]; then
+			logfile="$LOGS/$pkg.log"
+			mkdir -p $LOGS
+		fi
+
+		rdep_test $pkg $passed_file $failed_file $no_regression_file $logfile 
+
+		let i=i+1
+	done
+
+	echo "=======> PASSED:"
+	[ -e $passed_file ] && cat $passed_file
+
+	echo "=======> NOT A REGRESSION (FAILS WITHOUT REPO):"
+	[ -e $no_regression_file ] && cat $no_regression_file
+
+	echo "=======> FAILED (REGRESSION):"
+	[ -e $failed_file ] && cat $failed_file
+}
+
+
+# Default values
+DRYRUN=0
+QUIET=0
+REPO_OPTS=""  
+LOGS=""
+STATE=""
+INDEX="https://packages.wolfi.dev/os/x86_64/APKINDEX.tar.gz"
+AGAINST=""
+
+# Handle command line options
+while [ ! -z "$1" ]; do
+	case "$1" in
+		-d|--dry-run)
+			DRYRUN=1
+			shift
+		;;
+		-h|--help)
+			usage
+			exit 0
+		;;
+		-r|--repository)
+			REPO_OPTS="$REPO_OPTS --repository-append=$2"
+			shift 2
+		;;
+		-L|--logs-dir)
+			LOGS="$2"
+			shift 2
+		;;
+		-S|--state-dir)
+			STATE="$2"
+			shift 2
+		;;
+		-i|--destination-index)
+			INDEX="$2"
+			shift 2
+		;;
+		-q|--quiet)
+			QUIET=1
+			shift
+		;;
+		*)
+			# The default argument
+			# If already defined, print usage and exit
+			[ -n "$AGAINST" ] && { usage; exit 1; }
+			AGAINST="$1"
+			shift
+		;;
+	esac
+done
+
+if [ -z "$STATE" ]; then
+	STATE=$(mktemp -d -p . rdep-retest.XXXXXX)
+fi
+
+# Execute the tests
+run_tests 
