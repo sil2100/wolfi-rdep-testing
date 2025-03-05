@@ -157,6 +157,7 @@ done
 ARCH=$(uname -m)
 case "$INDEX" in
 	"os"|"wolfi")
+		HTTP_AUTH=""
 		INDEX="https://packages.wolfi.dev/os/$ARCH/APKINDEX.tar.gz"
 	;;
 	"enterprise")
@@ -168,6 +169,7 @@ case "$INDEX" in
 		INDEX="https://apk.cgr.dev/chainguard-private/$ARCH/APKINDEX.tar.gz"
 	;;
 	"extras")
+		HTTP_AUTH=""
 		INDEX="https://packages.wolfi.dev/extras/$ARCH/APKINDEX.tar.gz"
 	;;
 esac
