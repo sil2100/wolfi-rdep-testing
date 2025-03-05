@@ -9,7 +9,7 @@ usage() {
 	echo "  -r, --repository        The repository to test against"
 	echo "  -L, --logs-dir          The directory to store the logs"
 	echo "  -S, --state-dir         The directory to store the state"
-	echo "  -i, --destination-index The destination index to test against"
+	echo "  -i, --destination-index The destination index to test against (url or 'os', 'enterprise', 'extras')"
 	echo "  -q, --quiet             Do not print the output"
 	echo "  DEPENDENCY              The dep to test against"
 }
@@ -40,7 +40,7 @@ rdep_test() {
 	echo "=======> Testing $pkg"
 	if [ $DRYRUN -eq 1 ]; then
 		redirect_output $logfile
-		echo "DRYRUN: HTTP_AUTH=\"basic:apk.cgr.dev:user:$(chainctl auth token --audience apk.cgr.dev)\" MELANGE_EXTRA_OPTS=\"$REPO_OPTS\" make test/$pkg"
+		echo "DRYRUN: HTTP_AUTH=\"<TOKEN>\" MELANGE_EXTRA_OPTS=\"$REPO_OPTS\" make test/$pkg"
 		restore_output $logfile
 		return
 	fi
@@ -153,9 +153,32 @@ while [ ! -z "$1" ]; do
 	esac
 done
 
+# Extra handling of the index argument
+ARCH=$(uname -m)
+case "$INDEX" in
+	"os"|"wolfi")
+		INDEX="https://packages.wolfi.dev/os/$ARCH/APKINDEX.tar.gz"
+	;;
+	"enterprise")
+		# Check that we have the auth token in HTTP_AUTH environment variable
+		if [ -z "$HTTP_AUTH" ]; then
+			echo "ERROR: Missing HTTP_AUTH token for enterprise repository"
+			exit 1
+		fi
+		INDEX="https://apk.cgr.dev/chainguard-private/$ARCH/APKINDEX.tar.gz"
+	;;
+	"extras")
+		INDEX="https://packages.wolfi.dev/extras/$ARCH/APKINDEX.tar.gz"
+	;;
+esac
+
+# TODO: HTTP_AUTH used by apkrane and melange are a bit different. Reconcile or add some special handling
+
 if [ -z "$STATE" ]; then
 	STATE=$(mktemp -d -p . rdep-retest.XXXXXX)
 fi
+mkdir -p $STATE
+echo "=======> Saving results to: $STATE"
 
 # Execute the tests
 run_tests 
