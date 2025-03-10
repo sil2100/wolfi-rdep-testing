@@ -1,0 +1,39 @@
+#!/bin/sh
+# Copyright (C) 2025 Chainguard
+# Author: Łukasz 'sil2100' Zemczak
+
+usage() {
+	echo "rdep-list INDEX DEPENDENCY"
+    echo "  INDEX      The index to test against (url or 'os', 'enterprise', 'extras')"
+	echo "  DEPENDENCY The dependency to list reverse-dependencies of"
+}
+
+if [ $# -ne 2 ]; then
+    usage
+    exit 1
+fi
+
+INDEX=$1
+QUERY=$2
+
+ARCH=$(uname -m)
+case "$INDEX" in
+	"os"|"wolfi")
+		HTTP_AUTH=""
+		INDEX="https://packages.wolfi.dev/os/$ARCH/APKINDEX.tar.gz"
+	;;
+	"enterprise")
+		# Check that we have the auth token in HTTP_AUTH environment variable
+		if [ -z "$HTTP_AUTH" ]; then
+			echo "ERROR: Missing HTTP_AUTH token for enterprise repository"
+			exit 1
+		fi
+		INDEX="https://apk.cgr.dev/chainguard-private/$ARCH/APKINDEX.tar.gz"
+	;;
+	"extras")
+		HTTP_AUTH=""
+		INDEX="https://packages.cgr.dev/extras/$ARCH/APKINDEX.tar.gz"
+	;;
+esac
+
+apkrane ls --json --latest $INDEX | jq -r 'select(.Dependencies) | select(.Dependencies | index("'$QUERY'")) | .Origin' | sort | uniq
