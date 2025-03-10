@@ -170,7 +170,7 @@ case "$INDEX" in
 	;;
 	"extras")
 		HTTP_AUTH=""
-		INDEX="https://packages.wolfi.dev/extras/$ARCH/APKINDEX.tar.gz"
+		INDEX="https://packages.cgr.dev/extras/$ARCH/APKINDEX.tar.gz"
 	;;
 esac
 
